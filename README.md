@@ -27,4 +27,4 @@ async def main():
 asyncio.run(main())
 ```
 ## What to update.
-1. Create a special class for functions
+1. Create a special class for functions to for easy use
