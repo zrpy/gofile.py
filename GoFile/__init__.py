@@ -106,7 +106,7 @@ class GofileSyncClient:
         if not self.token:
             raise Exception("Token isn't set.")
         types={"name":str,"description":str,"tags":list,"public":bool,"expiry":int,"password":str}
-        if attribute in types:
+        if attribute not in types:
             raise Exception("The attribute is different.")
         if not types.get(attribute)==type(attribute_value):
             raise Exception("The type is different.")
@@ -118,7 +118,7 @@ class GofileSyncClient:
     def delete_content(self, content_id):
         if not self.token:
             raise Exception("Token isn't set.")
-        res=self.session.delete("https://api.gofile.io/contents",data={"contentsId":content_id},headers=self._make_headers(self.token),files={"file":open(file, "rb")}).json()
+        res=self.session.delete("https://api.gofile.io/contents",data={"contentsId":content_id},headers=self._make_headers(self.token)).json()
         if res["status"] == "ok":
             return True
         return False
@@ -231,7 +231,7 @@ class GofileAsyncClient:
     async def delete_content(self, content_id):
         if not self.token:
             raise Exception("Token isn't set.")
-        res=(await self.session.delete("https://api.gofile.io/contents",data={"contentsId":content_id},headers=self._make_headers(self.token),files={"file":open(file, "rb")})).json()
+        res=(await self.session.delete("https://api.gofile.io/contents",data={"contentsId":content_id},headers=self._make_headers(self.token))).json()
         if res["status"] == "ok":
             return True
         return False
