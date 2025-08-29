@@ -27,5 +27,4 @@ async def main():
 asyncio.run(main())
 ```
 ## What to update.
-1. Upload files
-2. Show the folder info
+1. Create a special class for functions
