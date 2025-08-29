@@ -49,7 +49,7 @@ class GofileSyncClient:
         else:
             return False
 
-    def get_links(self, code, password=None):
+    def get_info(self, code, password=None):
         if not self.token:
             raise Exception("Token isn't set.")
         if password:
@@ -164,7 +164,7 @@ class GofileAsyncClient:
         else:
             return False
 
-    async def get_links(self, code, password=None):
+    async def get_info(self, code, password=None):
         if not self.token:
             raise Exception("Token isn't set.")
         if password:
