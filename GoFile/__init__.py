@@ -8,67 +8,57 @@ from tqdm import tqdm
 class GofileSyncClient:
     def __init__(self, token=None, proxy=None):
         self.token = token
-        self.session = httpx.Client(timeout=60)
+        self.root_id = None
+        self.account_id = None
+        self.wt = None
+        self.session = httpx.Client(timeout=60, proxy=proxy)
 
     def _make_headers(self, token,download=False):
         if download:
             headers = {
-                "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-                "accept-language": "ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7",
-                "cache-control": "no-cache",
-                "pragma": "no-cache",
-                "sec-ch-ua": "\"Chromium\";v=\"137\", \"Not/A)Brand\";v=\"24\"",
-                "sec-ch-ua-mobile": "?1",
-                "sec-ch-ua-platform": "\"Android\"",
-                "sec-fetch-dest": "document",
-                "sec-fetch-mode": "navigate",
-                "sec-fetch-site": "same-site",
-                "sec-fetch-user": "?1",
-                "upgrade-insecure-requests": "1",
-                "cookie": "accountToken={}".format(self.token),
-                "Referer": "https://gofile.io/",
-                "Referrer-Policy": "origin"
+                "cookie": "accountToken={}".format(self.token)
             }
             return headers
-        headers = {
-            "accept": "*/*",
-            "accept-language": "ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7",
-            "cache-control": "no-cache",
-            "pragma": "no-cache",
-            "sec-ch-ua": '"Chromium";v="137", "Not/A)Brand";v="24"',
-            "sec-ch-ua-mobile": "?1",
-            "sec-ch-ua-platform": '"Android"',
-            "sec-fetch-dest": "empty",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-site": "same-site",
-            "Referer": "https://gofile.io/",
-            "Referrer-Policy": "origin",
-        }
+        headers = {}
         if token:
             headers["authorization"] = f"Bearer {token}"
         return headers
 
     def register(self):
+        self.wt = self.session.get("https://gofile.io/dist/js/global.js").text.split("appdata.wt")[1].split('"')[1]
         if self.token:
             return self.token
-        if not self.token:
+        elif not self.token:
             res = self.session.post("https://api.gofile.io/accounts",headers=self._make_headers(None)).json()
             if res["status"] == "ok":
                 self.token = res["data"]["token"]
-            return self.token
+                self.root_id = res["data"]["rootFolder"]
+                self.account_id = res["data"]["id"]
+                return self.token
+            else:
+                return ""
 
     def login(self,token):
-        self.token=token
+        self.wt = self.session.get("https://gofile.io/dist/js/global.js").text.split("appdata.wt")[1].split('"')[1]
+        res=self.session.get("https://api.gofile.io/accounts/website",headers=self._make_headers(self.token)).json()
+        if res["status"]=="ok":
+            self.token = res["data"]["token"]
+            self.root_id = res["data"]["rootFolder"]
+            self.account_id = res["data"]["id"]
+            return True
+        else:
+            return False
 
-    def get_links(self, code):
+    def get_links(self, code, password=None):
         if not self.token:
             raise Exception("Token isn't set.")
-        wt = self.session.get("https://gofile.io/dist/js/global.js").text.split("appdata.wt")[1].split('"')[1]
-        res = self.session.get(f"https://api.gofile.io/contents/{code}?wt={wt}&contentFilter=&page=1&pageSize=1000&sortField=name&sortDirection=1",headers=self._make_headers(self.token))
-        data = res.json()
-        if data["status"] == "ok":
-            return data["data"]
-        return data
+        if password:
+            res = self.session.get("https://api.gofile.io/contents/{}?wt={}&password={}&contentFilter=&page=1&pageSize=1000&sortField=name&sortDirection=1".format(code,self.wt,password),headers=self._make_headers(self.token)).json()
+        else:
+            res = self.session.get("https://api.gofile.io/contents/{}?wt={}&contentFilter=&page=1&pageSize=1000&sortField=name&sortDirection=1".format(code,self.wt),headers=self._make_headers(self.token)).json()
+        if res["status"] == "ok":
+            return res["data"]
+        return res
 
     def download(self,link,folder=os.getcwd()):
         if not self.token:
@@ -94,51 +84,67 @@ class GofileSyncClient:
                 bar.update(1)
             bar.close()
 
+    def create_folder(self,folder_id=None):
+        if not self.token:
+            raise Exception("Token isn't set.")
+        if not folder_id:
+            folder_id=self.root_id
+        res=self.session.post("https://api.gofile.io/contents/createfolder",headers=self._make_headers(self.token),json={"parentFolderId":folder_id,"public":True}).json()
+        if res["status"] == "ok":
+            return res["data"]
+        return res
+
+    def upload(self,file:os.path.join,folder_id=None):
+        if not self.token:
+            raise Exception("Token isn't set.")
+        res=self.session.post("https://upload.gofile.io/uploadfile",data={"folderId":folder_id},headers=self._make_headers(self.token),files={"file":open(file, "rb")}).json()
+        if res["status"] == "ok":
+            return res["data"]
+        return res
+
+    def update(self,content_id,attribute,attribute_value):
+        if not self.token:
+            raise Exception("Token isn't set.")
+        types={"name":str,"description":str,"tags":list,"public":bool,"expiry":int,"password":str}
+        if attribute in types:
+            raise Exception("The attribute is different.")
+        if not types.get(attribute)==type(attribute_value):
+            raise Exception("The type is different.")
+        res=self.session.post("https://api.gofile.io/contents/{}/update".format(content_id),json={"attribute":attribute,"attributeValue":attribute_value},headers=self._make_headers(self.token)).json()
+        if res["status"] == "ok":
+            return True
+        return False
+
+    def delete_content(self, content_id):
+        if not self.token:
+            raise Exception("Token isn't set.")
+        res=self.session.delete("https://api.gofile.io/contents",data={"contentsId":content_id},headers=self._make_headers(self.token),files={"file":open(file, "rb")}).json()
+        if res["status"] == "ok":
+            return True
+        return False
+
 
 class GofileAsyncClient:
     def __init__(self, token=None, proxy=None):
         self.token = token
-        self.session = httpx.AsyncClient(proxy=proxy,timeout=60)
+        self.root_id = None
+        self.account_id = None
+        self.wt = None
+        self.session = httpx.AsyncClient(timeout=60, proxy=proxy)
 
     def _make_headers(self, token,download=False):
         if download:
             headers = {
-                "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-                "accept-language": "ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7",
-                "cache-control": "no-cache",
-                "pragma": "no-cache",
-                "sec-ch-ua": "\"Chromium\";v=\"137\", \"Not/A)Brand\";v=\"24\"",
-                "sec-ch-ua-mobile": "?1",
-                "sec-ch-ua-platform": "\"Android\"",
-                "sec-fetch-dest": "document",
-                "sec-fetch-mode": "navigate",
-                "sec-fetch-site": "same-site",
-                "sec-fetch-user": "?1",
-                "upgrade-insecure-requests": "1",
-                "cookie": "accountToken={}".format(self.token),
-                "Referer": "https://gofile.io/",
-                "Referrer-Policy": "origin"
+                "cookie": "accountToken={}".format(self.token)
             }
             return headers
-        headers = {
-            "accept": "*/*",
-            "accept-language": "ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7",
-            "cache-control": "no-cache",
-            "pragma": "no-cache",
-            "sec-ch-ua": '"Chromium";v="137", "Not/A)Brand";v="24"',
-            "sec-ch-ua-mobile": "?1",
-            "sec-ch-ua-platform": '"Android"',
-            "sec-fetch-dest": "empty",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-site": "same-site",
-            "Referer": "https://gofile.io/",
-            "Referrer-Policy": "origin",
-        }
+        headers = {}
         if token:
             headers["authorization"] = f"Bearer {token}"
         return headers
 
     async def register(self):
+        self.wt = self.session.get("https://gofile.io/dist/js/global.js").text.split("appdata.wt")[1].split('"')[1]
         if self.token:
             return self.token
         if not self.token:
@@ -148,17 +154,26 @@ class GofileAsyncClient:
             return self.token
 
     async def login(self,token):
-        self.token=token
+        self.wt = (await self.session.get("https://gofile.io/dist/js/global.js")).text.split("appdata.wt")[1].split('"')[1]
+        res=(await self.session.get("https://api.gofile.io/accounts/website",headers=self._make_headers(self.token))).json()
+        if res["status"]=="ok":
+            self.token = res["data"]["token"]
+            self.root_id = res["data"]["rootFolder"]
+            self.account_id = res["data"]["id"]
+            return True
+        else:
+            return False
 
-    async def get_links(self, code):
+    async def get_links(self, code, password=None):
         if not self.token:
             raise Exception("Token isn't set.")
-        wt = (await self.session.get("https://gofile.io/dist/js/global.js")).text.split("appdata.wt")[1].split('"')[1]
-        res = await self.session.get(f"https://api.gofile.io/contents/{code}?wt={wt}&contentFilter=&page=1&pageSize=1000&sortField=name&sortDirection=1",headers=self._make_headers(self.token))
-        data = res.json()
-        if data["status"] == "ok":
-            return data["data"]
-        return data
+        if password:
+            res = (await self.session.get("https://api.gofile.io/contents/{}?wt={}&password={}&contentFilter=&page=1&pageSize=1000&sortField=name&sortDirection=1".format(code,self.wt,password),headers=self._make_headers(self.token))).json()
+        else:
+            res = (await self.session.get("https://api.gofile.io/contents/{}?wt={}&contentFilter=&page=1&pageSize=1000&sortField=name&sortDirection=1".format(code,self.wt),headers=self._make_headers(self.token))).json()
+        if res["status"] == "ok":
+            return res["data"]
+        return res
 
     async def download(self,link,folder=os.getcwd()):
         if not self.token:
@@ -183,3 +198,40 @@ class GofileAsyncClient:
                 f.write(chunk)
                 bar.update(1)
             bar.close()
+
+    async def create_folder(self,folder_id=None):
+        if not self.token:
+            raise Exception("Token isn't set.")
+        if not folder_id:
+            folder_id=self.root_id
+        res=(await self.session.post("https://api.gofile.io/contents/createfolder",headers=self._make_headers(self.token),json={"parentFolderId":folder_id,"public":True})).json()
+        return res
+
+    async def upload(self,file:os.path.join,folder_id=None):
+        if not self.token:
+            raise Exception("Token isn't set.")
+        res=(await self.session.post("https://upload.gofile.io/uploadfile",data={"folderId":folder_id},headers=self._make_headers(self.token),files={"file":open(file, "rb")})).json()
+        if res["status"] == "ok":
+            return res["data"]
+        return res
+
+    async def update(self,content_id,attribute,attribute_value):
+        if not self.token:
+            raise Exception("Token isn't set.")
+        types={"name":str,"description":str,"tags":list,"public":bool,"expiry":int,"password":str}
+        if attribute in types:
+            raise Exception("The attribute is different.")
+        if not types.get(attribute)==type(attribute_value):
+            raise Exception("The type is different.")
+        res=(await self.session.post("https://api.gofile.io/contents/{}/update".format(content_id),json={"attribute":attribute,"attributeValue":attribute_value},headers=self._make_headers(self.token))).json()
+        if res["status"] == "ok":
+            return True
+        return False
+
+    async def delete_content(self, content_id):
+        if not self.token:
+            raise Exception("Token isn't set.")
+        res=(await self.session.delete("https://api.gofile.io/contents",data={"contentsId":content_id},headers=self._make_headers(self.token),files={"file":open(file, "rb")})).json()
+        if res["status"] == "ok":
+            return True
+        return False
