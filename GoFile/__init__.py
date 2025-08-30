@@ -3,11 +3,12 @@ import re
 import urllib
 import os
 from tqdm import tqdm
-
+from io import BytesIO, StringIO
+import random
 
 class GofileSyncClient:
-    def __init__(self, token=None, proxy=None):
-        self.token = token
+    def __init__(self, proxy=None):
+        self.token = None
         self.root_id = None
         self.account_id = None
         self.wt = None
@@ -24,6 +25,16 @@ class GofileSyncClient:
             headers["authorization"] = f"Bearer {token}"
         return headers
 
+    def _content_to_file(self,data, filename, mime:str="application/octet-stream"):
+        if isinstance(data, str):
+            file_like = StringIO(data)
+            mime = "text/plain" if mime == "application/octet-stream" else mime
+        elif isinstance(data, bytes):
+            file_like = BytesIO(data)
+        else:
+            raise TypeError("data must be str or bytes")
+        return (filename, file_like, mime)
+    
     def register(self):
         self.wt = self.session.get("https://gofile.io/dist/js/global.js").text.split("appdata.wt")[1].split('"')[1]
         if self.token:
@@ -40,7 +51,7 @@ class GofileSyncClient:
 
     def login(self,token):
         self.wt = self.session.get("https://gofile.io/dist/js/global.js").text.split("appdata.wt")[1].split('"')[1]
-        res=self.session.get("https://api.gofile.io/accounts/website",headers=self._make_headers(self.token)).json()
+        res=self.session.get("https://api.gofile.io/accounts/website",headers=self._make_headers(token)).json()
         if res["status"]=="ok":
             self.token = res["data"]["token"]
             self.root_id = res["data"]["rootFolder"]
@@ -94,10 +105,20 @@ class GofileSyncClient:
             return res["data"]
         return res
 
-    def upload(self,file:os.path.join,folder_id=None):
+    def upload(self,file_path,folder_id=None):
         if not self.token:
             raise Exception("Token isn't set.")
-        res=self.session.post("https://upload.gofile.io/uploadfile",data={"folderId":folder_id},headers=self._make_headers(self.token),files={"file":open(file, "rb")}).json()
+        res=self.session.post("https://upload.gofile.io/uploadfile",data={"folderId":folder_id},headers=self._make_headers(self.token),files={"file":open(file_path, "rb")}).json()
+        if res["status"] == "ok":
+            return res["data"]
+        return res
+
+    def upload_by_content(self,content,file_name="random",folder_id=None):
+        if not self.token:
+            raise Exception("Token isn't set.")
+        if file_name=="random":
+            file_name="upload_{}".format(random.randint(1000,9999))
+        res=self.session.post("https://upload.gofile.io/uploadfile",data={"folderId":folder_id},headers=self._make_headers(self.token),files={"file":self._content_to_file(content,filename=file_name)}).json()
         if res["status"] == "ok":
             return res["data"]
         return res
@@ -125,8 +146,8 @@ class GofileSyncClient:
 
 
 class GofileAsyncClient:
-    def __init__(self, token=None, proxy=None):
-        self.token = token
+    def __init__(self, proxy=None):
+        self.token = None
         self.root_id = None
         self.account_id = None
         self.wt = None
@@ -143,8 +164,18 @@ class GofileAsyncClient:
             headers["authorization"] = f"Bearer {token}"
         return headers
 
+    def _content_to_file(self,data, filename, mime:str="application/octet-stream"):
+        if isinstance(data, str):
+            file_like = StringIO(data)
+            mime = "text/plain" if mime == "application/octet-stream" else mime
+        elif isinstance(data, bytes):
+            file_like = BytesIO(data)
+        else:
+            raise TypeError("data must be str or bytes")
+        return (filename, file_like, mime)
+
     async def register(self):
-        self.wt = self.session.get("https://gofile.io/dist/js/global.js").text.split("appdata.wt")[1].split('"')[1]
+        self.wt = (await self.session.get("https://gofile.io/dist/js/global.js")).text.split("appdata.wt")[1].split('"')[1]
         if self.token:
             return self.token
         if not self.token:
@@ -155,7 +186,7 @@ class GofileAsyncClient:
 
     async def login(self,token):
         self.wt = (await self.session.get("https://gofile.io/dist/js/global.js")).text.split("appdata.wt")[1].split('"')[1]
-        res=(await self.session.get("https://api.gofile.io/accounts/website",headers=self._make_headers(self.token))).json()
+        res=(await self.session.get("https://api.gofile.io/accounts/website",headers=self._make_headers(token))).json()
         if res["status"]=="ok":
             self.token = res["data"]["token"]
             self.root_id = res["data"]["rootFolder"]
@@ -207,10 +238,20 @@ class GofileAsyncClient:
         res=(await self.session.post("https://api.gofile.io/contents/createfolder",headers=self._make_headers(self.token),json={"parentFolderId":folder_id,"public":True})).json()
         return res
 
-    async def upload(self,file:os.path.join,folder_id=None):
+    async def upload(self,file_path,folder_id=None):
         if not self.token:
             raise Exception("Token isn't set.")
-        res=(await self.session.post("https://upload.gofile.io/uploadfile",data={"folderId":folder_id},headers=self._make_headers(self.token),files={"file":open(file, "rb")})).json()
+        res=(await self.session.post("https://upload.gofile.io/uploadfile",data={"folderId":folder_id},headers=self._make_headers(self.token),files={"file":open(file_path, "rb")})).json()
+        if res["status"] == "ok":
+            return res["data"]
+        return res
+
+    async def upload_by_content(self,content,file_name="random",folder_id=None):
+        if not self.token:
+            raise Exception("Token isn't set.")
+        if file_name=="random":
+            file_name="upload_{}".format(random.randint(1000,9999))
+        res=(await self.session.post("https://upload.gofile.io/uploadfile",data={"folderId":folder_id},headers=self._make_headers(self.token),files={"file":self._content_to_file(content,filename=file_name)})).json()
         if res["status"] == "ok":
             return res["data"]
         return res
@@ -224,6 +265,17 @@ class GofileAsyncClient:
         if not types.get(attribute)==type(attribute_value):
             raise Exception("The type is different.")
         res=(await self.session.post("https://api.gofile.io/contents/{}/update".format(content_id),json={"attribute":attribute,"attributeValue":attribute_value},headers=self._make_headers(self.token))).json()
+        if res["status"] == "ok":
+            return True
+        return False
+
+    async def delete_content(self, content_id):
+        if not self.token:
+            raise Exception("Token isn't set.")
+        res=(await self.session.delete("https://api.gofile.io/contents",data={"contentsId":content_id},headers=self._make_headers(self.token))).json()
+        if res["status"] == "ok":
+            return True
+        return FalseattributeValue":attribute_value},headers=self._make_headers(self.token))).json()
         if res["status"] == "ok":
             return True
         return False
